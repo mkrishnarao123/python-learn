@@ -16,6 +16,7 @@ class User(Base):
     mobileNumber = Column(String)
     password = Column(String)
     username = Column(String)
+    restart = Column(Boolean)
 
 class Base(DeclarativeBase):
     pass
@@ -100,6 +101,7 @@ class QuizSubtopic(Base):
     __tablename__ = "quiz_subtopics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    completed: Mapped[bool] = mapped_column(Boolean)
     topic_id: Mapped[int] = mapped_column(
         ForeignKey("quiz_topics.id", ondelete="CASCADE"), nullable=False, index=True
     )

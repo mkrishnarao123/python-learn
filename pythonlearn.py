@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from models import AnswerMatch
 import database_models
 from database import get_db
 from sqlalchemy.orm import Session
@@ -74,7 +75,7 @@ def get_quiz_bank(db: Session = Depends(get_db)):
             db_quiz_subtopic_matcher = db.query(database_models.QuizSubtopicMatcher).filter(database_models.QuizSubtopicMatcher.subtopic_id == j.id).all()
             db_quiz_subtopic_matchers = [cmd.matcher for cmd in db_quiz_subtopic_matcher]
 
-            dn_quiz_question = db.query(database_models.QuizQuestion).all()
+            dn_quiz_question = db.query(database_models.QuizQuestion).filter(database_models.QuizQuestion.subtopic_id == j.id).all()
             dn_quiz_question_arr = []
             for g in dn_quiz_question:
 
@@ -82,25 +83,26 @@ def get_quiz_bank(db: Session = Depends(get_db)):
                 db_quiz_question_accepted_phrases = [cmd.phrase for cmd in db_quiz_question_accepted_phrase]
 
                 dn_quiz_question_obj = {
-                    "id": g.question_key,
+                    "id": g.id,
                     "prompt": g.prompt,
                     "answer": g.answer,
                     "acceptedPhrases": db_quiz_question_accepted_phrases,
                 }
                 dn_quiz_question_arr.append(dn_quiz_question_obj)
-
             subtopic_obj = {
-                "id": j.subtopic_key,
+                "id": j.id,
                 "title": j.title,
                 "googleQuery": j.google_query,
                 "matchers": db_quiz_subtopic_matchers,
                 "questions": dn_quiz_question_arr,
+                "completed": j.completed
             }
+            dn_quiz_question_arr = []
 
             quiz_subtopics_arr.append(subtopic_obj)
 
         topicObj = {
-            "id": i.topic_key,
+            "id": i.id,
             "title": i.title,
             "keywords": db_quiz_topic_keywords,
             "subtopics": quiz_subtopics_arr
@@ -110,3 +112,42 @@ def get_quiz_bank(db: Session = Depends(get_db)):
         db_final_quiz_tpoics.append(topicObj)
 
     return {"topics": db_final_quiz_tpoics}
+
+@router.put("/check-answer")
+def check_answer(answerMatches: list[AnswerMatch], db: Session = Depends(get_db)):
+    try:
+        updated = 0
+        for match in answerMatches:
+            check_list_task = db.query(database_models.ChecklistTask).filter(
+                database_models.ChecklistTask.day_id == match.topicId,
+                database_models.ChecklistTask.id == match.subtopicId
+            ).first()
+            if check_list_task:
+                check_list_task.done_default = True if match.answer else False
+                updated += 1
+
+        # commit once after processing all items
+        db.commit()
+
+        # Return updated subtopics for the topic
+        check_list_tasks = db.query(database_models.ChecklistTask).filter(
+            database_models.ChecklistTask.day_id == answerMatches[0].topicId
+        ).all()
+        return {"success": True, "updated": updated, "subtopics": check_list_tasks}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(exc)}")
+
+@router.put("/restart")
+def restart_quiz(db: Session = Depends(get_db)):
+    try:
+        check_list_task = db.query(database_models.ChecklistTask).all()
+        for quiz in check_list_task:
+            quiz.done_default = False
+        db.commit()
+        return {"success": True, "updated": len(check_list_task), "message": "All quiz progress reset"}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(exc)}")
+    
+

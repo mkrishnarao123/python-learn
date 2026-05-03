@@ -37,9 +37,35 @@ def ensure_auth_table_columns() -> None:
         connection.execute(text('ALTER TABLE auth ADD COLUMN IF NOT EXISTS "mobileNumber" VARCHAR'))
         connection.execute(text('ALTER TABLE auth ADD COLUMN IF NOT EXISTS "username" VARCHAR'))
         connection.execute(text('ALTER TABLE auth ADD COLUMN IF NOT EXISTS "password" VARCHAR'))
+        connection.execute(text('''
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'auth' AND column_name = 'role'
+                ) AND NOT EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'auth' AND column_name = 'restart'
+                ) THEN
+                    ALTER TABLE auth RENAME COLUMN role TO restart;
+                END IF;
+            END $$;
+        '''))
+        connection.execute(text('ALTER TABLE auth ADD COLUMN IF NOT EXISTS restart BOOLEAN DEFAULT FALSE'))
 
 
 ensure_auth_table_columns()
+
+
+def ensure_quiz_subtopics_columns() -> None:
+    # Ensure quiz_subtopics table has completed column for existing databases.
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE quiz_subtopics ADD COLUMN IF NOT EXISTS completed BOOLEAN DEFAULT FALSE'))
+
+
+ensure_quiz_subtopics_columns()
 
 @app.get('/')
 def greet():

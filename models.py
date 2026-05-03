@@ -7,7 +7,7 @@ class User(BaseModel):
     mobileNumber: str
     username: str
     password: str
-    role: str
+    restart: bool
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -15,6 +15,12 @@ class User(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+class AnswerMatch(BaseModel):
+    answer: str
+    id: int
+    subtopicId: int
+    topicId: int
 
 
 class ChecklistDay(BaseModel):
@@ -72,6 +78,7 @@ class QuizSubtopic(BaseModel):
     subtopic_key: str
     title: str
     google_query: str
+    completed: bool
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
