@@ -7,15 +7,29 @@ from sqlalchemy.orm import Session
 
 router = APIRouter()
 
-@router.get("/ChecklistDay")
-def get_all_checlist(db: Session = Depends(get_db)):
+
+@router.get("/ChecklistDay/{userId}")
+def get_all_checlist(userId: int, db: Session = Depends(get_db)):
     db_checklist = db.query(database_models.ChecklistDay).all()
     # db_sub_checklist = db.query(database_models.ChecklistTask).all()
     db_final_checklist = []
     for i in db_checklist:
-        db_sub_checklist = db.query(database_models.ChecklistTask).filter(database_models.ChecklistTask.day_id == i.id).all()
+        db_sub_checklist = db.query(database_models.ChecklistTask).filter(
+            database_models.ChecklistTask.day_id == i.id
+        ).order_by(database_models.ChecklistTask.sort_order.asc()).all()
+        sub_task_list = []
+        for subTask in db_sub_checklist:
+            user_task_status = db.query(database_models.UserBasedTaskCompleted).filter(
+                database_models.UserBasedTaskCompleted.user_id == userId,
+                database_models.UserBasedTaskCompleted.sub_topic_id == subTask.id,
+                database_models.UserBasedTaskCompleted.topic_id == subTask.day_id,
+            ).first()
+            task_obj = subTask
+            task_obj.done_default = user_task_status.task_completed
+            sub_task_list.append(task_obj)
         db_obj = i
-        db_obj.tasks = db_sub_checklist
+        db_obj.tasks = sub_task_list
+        db_obj.userId = userId
         db_final_checklist.append(db_obj)
     return db_final_checklist
 
@@ -113,41 +127,99 @@ def get_quiz_bank(db: Session = Depends(get_db)):
 
     return {"topics": db_final_quiz_tpoics}
 
-@router.put("/check-answer")
+@router.get("/subtopic-questions/{subtopicId}")
+def sub_topic_questions( subtopicId: int, db: Session = Depends(get_db)):
+    dn_quiz_question = db.query(database_models.QuizQuestion).filter(database_models.QuizQuestion.subtopic_id == subtopicId).all()
+    dn_quiz_question_arr = []
+    for g in dn_quiz_question:
+
+        db_quiz_question_accepted_phrase = db.query(database_models.QuizQuestionAcceptedPhrase).filter(database_models.QuizQuestionAcceptedPhrase.question_id == g.id).all()
+        db_quiz_question_accepted_phrases = [cmd.phrase for cmd in db_quiz_question_accepted_phrase]
+
+        dn_quiz_question_obj = {
+            "id": g.id,
+            "prompt": g.prompt,
+            "answer": g.answer,
+            "acceptedPhrases": db_quiz_question_accepted_phrases,
+        }
+        dn_quiz_question_arr.append(dn_quiz_question_obj)
+
+    return dn_quiz_question_arr
+
+@router.post("/check-answer")
 def check_answer(answerMatches: list[AnswerMatch], db: Session = Depends(get_db)):
+
     try:
         updated = 0
         for match in answerMatches:
-            check_list_task = db.query(database_models.ChecklistTask).filter(
-                database_models.ChecklistTask.day_id == match.topicId,
-                database_models.ChecklistTask.id == match.subtopicId
+            user_based_task_completed = db.query(database_models.UserBasedTaskCompleted).filter(
+                database_models.UserBasedTaskCompleted.user_id == match.user_id,
+                database_models.UserBasedTaskCompleted.topic_id == match.topicId,
+                database_models.UserBasedTaskCompleted.sub_topic_id == match.subtopicId
             ).first()
-            if check_list_task:
-                check_list_task.done_default = True if match.answer else False
+            if user_based_task_completed:
+                dn_quiz_question = db.query(database_models.QuizQuestion).filter(
+                    database_models.QuizQuestion.subtopic_id == match.subtopicId, 
+                    database_models.QuizQuestion.id == match.id, 
+                    ).first()
+                if match.answer != dn_quiz_question.answer:
+                    user_based_task_completed.task_completed = False
+                    db.commit()
+                    return {"success": False}
+                user_based_task_completed.task_completed = True if match.answer == dn_quiz_question.answer else False
                 updated += 1
 
         # commit once after processing all items
         db.commit()
 
-        # Return updated subtopics for the topic
-        check_list_tasks = db.query(database_models.ChecklistTask).filter(
-            database_models.ChecklistTask.day_id == answerMatches[0].topicId
-        ).all()
-        return {"success": True, "updated": updated, "subtopics": check_list_tasks}
+        return {"success": True, "updated": updated}
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(exc)}")
 
-@router.put("/restart")
-def restart_quiz(db: Session = Depends(get_db)):
+@router.put("/restart/{user_id}")
+def restart_quiz(user_id: int, db: Session = Depends(get_db)):
     try:
-        check_list_task = db.query(database_models.ChecklistTask).all()
-        for quiz in check_list_task:
-            quiz.done_default = False
+        user_task_completed = db.query(database_models.UserBasedTaskCompleted).filter(
+            database_models.UserBasedTaskCompleted.user_id == user_id
+        ).all()
+        for user_task in user_task_completed:
+            user_task.task_completed = False
         db.commit()
-        return {"success": True, "updated": len(check_list_task), "message": "All quiz progress reset"}
+        return {"success": True, "updated": len(user_task_completed), "message": "All quiz progress reset"}
     except Exception as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {str(exc)}")
-    
+   
 
+def create_user_tasks( db: Session) -> dict:
+    """
+    Helper function to create user task records.
+    Can be called from other modules like auth_api.
+    """
+    try:
+        # Check if user already has task records
+        
+        db_sub_checklist = db.query(database_models.ChecklistTask).all()
+        db_users = db.query(database_models.User).all()
+        # If no records exist, create them for all tasks
+        for user in db_users:
+            for task in db_sub_checklist:
+                existing_records = db.query(database_models.UserBasedTaskCompleted).filter(
+                    database_models.UserBasedTaskCompleted.user_id == user.id,
+                    database_models.UserBasedTaskCompleted.topic_id == task.day_id,
+                    database_models.UserBasedTaskCompleted.sub_topic_id == task.id,
+                    ).first()
+                if not existing_records:
+                    new_record = database_models.UserBasedTaskCompleted(
+                        user_id=user.id,
+                        topic_id=task.day_id,
+                        sub_topic_id=task.id,
+                        task_completed=False
+                    )
+                    db.add(new_record)
+        db.commit()
+        return {"success": True, "created": len(db_sub_checklist)}
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error creating user tasks: {str(exc)}")

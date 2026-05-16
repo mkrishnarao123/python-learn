@@ -51,6 +51,15 @@ class ChecklistTask(Base):
     day: Mapped["ChecklistDay"] = relationship(back_populates="tasks")
 
 
+class UserBasedTaskCompleted(Base):
+    __tablename__ = "user_based_task_completed"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sub_topic_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    task_completed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
 class ChecklistExtraTopic(Base):
     __tablename__ = "checklist_extra_topics"
 

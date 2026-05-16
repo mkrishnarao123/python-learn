@@ -21,6 +21,7 @@ class AnswerMatch(BaseModel):
     id: int
     subtopicId: int
     topicId: int
+    user_id: int
 
 
 class ChecklistDay(BaseModel):

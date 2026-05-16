@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from database import get_db
 from datetime import timedelta
 from auth_token import ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token
+from pythonlearn import create_user_tasks
 
 router = APIRouter()
 
@@ -21,17 +22,31 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    
+    # Call function from pythonlearn to create user tasks
+    create_user_tasks(db)
+    
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
         data={"sub": db_user.username}, expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return {"access_token": access_token, "token_type": "bearer", "user_details": db_user}
     
 @router.get("/all-users")
 def get_all_users(db: Session = Depends(get_db)):
     
     db_users = db.query(database_models.User).all()
-    return db_users
+    users_details = []
+    for user in db_users:
+        completed_count = db.query(database_models.UserBasedTaskCompleted).filter(
+            database_models.UserBasedTaskCompleted.user_id == user.id,
+            database_models.UserBasedTaskCompleted.task_completed.is_(True)
+            ).count()
+        
+        user_obj = user
+        user_obj.restart = True if completed_count > 0 else False
+        users_details.append(user_obj)
+    return users_details
 
 @router.get("/user/{username}")
 def get_user(username: str, db: Session = Depends(get_db)):
@@ -73,7 +88,12 @@ def delete_user(id: int, db: Session = Depends(get_db)):
     db_user = db.query(database_models.User).filter(database_models.User.id == id).first()
     if db_user:
         try:
+            user_tasks = db.query(database_models.UserBasedTaskCompleted).filter(database_models.UserBasedTaskCompleted.user_id == db_user.id).all()
+            for user in user_tasks:
+                db.delete(user)
+                
             db.delete(db_user)
+
             db.commit()
             return "User deleted"
         except SQLAlchemyError as exc:

@@ -67,6 +67,52 @@ def ensure_quiz_subtopics_columns() -> None:
 
 ensure_quiz_subtopics_columns()
 
+
+def ensure_user_based_task_completed_columns() -> None:
+    # Keep the user_based_task_completed table aligned for databases created before user_id existed.
+    with engine.begin() as connection:
+        connection.execute(text('ALTER TABLE user_based_task_completed ADD COLUMN IF NOT EXISTS user_id INTEGER DEFAULT 0'))
+
+
+ensure_user_based_task_completed_columns()
+
+
+def ensure_user_based_task_completed_renames() -> None:
+    # Rename old misspelled columns to the new column names for existing databases.
+    with engine.begin() as connection:
+        connection.execute(text('''
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'user_based_task_completed' AND column_name = 'topis_id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'user_based_task_completed' AND column_name = 'topic_id'
+                ) THEN
+                    ALTER TABLE user_based_task_completed RENAME COLUMN topis_id TO topic_id;
+                END IF;
+            END $$;
+        '''))
+
+        connection.execute(text('''
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'user_based_task_completed' AND column_name = 'sub_topis_id'
+                ) AND NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'user_based_task_completed' AND column_name = 'sub_topic_id'
+                ) THEN
+                    ALTER TABLE user_based_task_completed RENAME COLUMN sub_topis_id TO sub_topic_id;
+                END IF;
+            END $$;
+        '''))
+
+
+ensure_user_based_task_completed_renames()
+
 @app.get('/')
 def greet():
     return "welconme to the krishna world"
